@@ -1,0 +1,4 @@
+.venv/
+.atlan-api-token
+__pycache__/
+*.pyc

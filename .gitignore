@@ -6,3 +6,5 @@ __pycache__/
 *.json
 connection_info.txt
 .claude/
+testing/.atlan-api-token
+testing/.venv/

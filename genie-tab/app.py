@@ -4,8 +4,11 @@ Embedded chat interface for Databricks Genie spaces within Atlan
 """
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
+import json
 import os
+import hashlib
 import httpx
+import jwt
 import requests as http_requests
 import time
 import logging
@@ -34,6 +37,12 @@ CORS(app, origins=[
 DATABRICKS_WORKSPACE_URL = os.getenv('DATABRICKS_WORKSPACE_URL', '')
 DATABRICKS_TOKEN = os.getenv('DATABRICKS_TOKEN', '')
 ATLAN_INSTANCE_URL = os.getenv('ATLAN_INSTANCE_URL', 'https://databricks.atlan.com')
+GENIE_ACCESS_POLICY_NAME = os.getenv('GENIE_ACCESS_POLICY_NAME', 'Genie Space Access')
+
+# Cache for policy-to-role mapping and user access results
+_genie_persona_role_cache = None
+_access_cache = {}  # {token_hash: (allowed, username, reason, timestamp)}
+ACCESS_CACHE_TTL = 300  # 5 minutes
 
 
 def get_bearer_token():
@@ -42,6 +51,181 @@ def get_bearer_token():
     if not auth_header.startswith('Bearer '):
         return None
     return auth_header.replace('Bearer ', '')
+
+def get_genie_persona_role(token):
+    """
+    Search for the Genie access policy by name and derive its persona's Keycloak role.
+
+    Searches for an AuthPolicy named GENIE_ACCESS_POLICY_NAME, extracts the parent
+    persona's qualifiedName, and derives the Keycloak role (persona_{suffix}).
+    Result is cached at app level since the policy rarely changes.
+
+    Returns the role string (e.g. "persona_yZbu3EfEtFOfaZxyKqBgTO") or None.
+    """
+    global _genie_persona_role_cache
+    if _genie_persona_role_cache:
+        return _genie_persona_role_cache
+
+    try:
+        resp = http_requests.post(
+            f"{ATLAN_INSTANCE_URL}/api/meta/search/indexsearch",
+            headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+            json={
+                "dsl": {
+                    "from": 0, "size": 1,
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {"term": {"__typeName.keyword": "AuthPolicy"}},
+                                {"term": {"name.keyword": GENIE_ACCESS_POLICY_NAME}},
+                            ]
+                        }
+                    },
+                },
+                "attributes": ["name", "accessControl"],
+                "relationAttributes": ["name", "qualifiedName"],
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Policy search failed: {resp.status_code}")
+            return None
+
+        entities = resp.json().get("entities", [])
+        if not entities:
+            logger.warning(f"No policy found named '{GENIE_ACCESS_POLICY_NAME}'")
+            return None
+
+        access_control = entities[0]["attributes"].get("accessControl", {})
+        persona_qn = access_control.get("uniqueAttributes", {}).get("qualifiedName", "")
+        if "/" not in persona_qn:
+            logger.warning(f"Cannot derive role from persona qualifiedName: {persona_qn}")
+            return None
+
+        suffix = persona_qn.split("/")[-1]
+        role_name = f"persona_{suffix}"
+        _genie_persona_role_cache = role_name
+        logger.info(f"Genie persona role resolved: {role_name}")
+        return role_name
+
+    except Exception as e:
+        logger.error(f"Error searching for Genie access policy: {e}")
+        return None
+
+
+def check_genie_access(token):
+    """
+    Check if the user (identified by their OAuth token) has access to Genie spaces.
+
+    Access is granted if:
+      1. The user has workspaceRole "$admin" (admin / all-assets bypass), OR
+      2. The user has the Keycloak role for the persona that owns the
+         "Genie Space Access" policy.
+
+    Returns: (allowed: bool, username: str, reason: str)
+    """
+    # Check cache first
+    token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+    cached = _access_cache.get(token_hash)
+    if cached:
+        allowed, username, reason, ts = cached
+        if time.time() - ts < ACCESS_CACHE_TTL:
+            return allowed, username, reason
+
+    # 1. Resolve the persona role for the Genie access policy
+    persona_role = get_genie_persona_role(token)
+    if not persona_role:
+        return False, "unknown", "policy_not_found"
+
+    # 2. Get user identity
+    username, user_id = _get_user_identity(token)
+    if not username:
+        return False, "unknown", "identity_failed"
+
+    # 3. Get user details and check access
+    allowed, reason = _check_user_roles(token, username, user_id, persona_role)
+
+    # Cache the result
+    _access_cache[token_hash] = (allowed, username, reason, time.time())
+    return allowed, username, reason
+
+
+def _get_user_identity(token):
+    """Get username and user ID from token. Tries API first, falls back to JWT decode."""
+    try:
+        resp = http_requests.get(
+            f"{ATLAN_INSTANCE_URL}/api/service/users/current",
+            headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("username", ""), data.get("id", "")
+    except Exception as e:
+        logger.warning(f"users/current API failed: {e}")
+
+    # Fallback: decode JWT without verification
+    try:
+        decoded = jwt.decode(token, options={"verify_signature": False})
+        username = decoded.get("preferred_username") or decoded.get("username") or ""
+        user_id = decoded.get("userId") or decoded.get("sub") or ""
+        return username, user_id
+    except Exception as e:
+        logger.error(f"JWT decode failed: {e}")
+        return None, None
+
+
+def _check_user_roles(token, username, user_id, persona_role):
+    """Check user's workspace role and persona membership. Returns (allowed, reason)."""
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+    # Try /api/service/users endpoint for full user details
+    try:
+        filter_json = json.dumps({"$and": [{"username": username}]})
+        resp = http_requests.get(
+            f"{ATLAN_INSTANCE_URL}/api/service/users",
+            headers=headers,
+            params={"limit": 1, "offset": 0, "filter": filter_json, "sort": "username"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            records = data if isinstance(data, list) else data.get("records", [])
+            if records:
+                user = records[0]
+                if user.get("workspaceRole") == "$admin":
+                    logger.info(f"Access granted for {username}: admin")
+                    return True, "admin"
+                if persona_role in user.get("roles", []):
+                    logger.info(f"Access granted for {username}: policy match")
+                    return True, "policy_match"
+                logger.info(f"Access denied for {username}: missing role {persona_role}")
+                return False, "no_access"
+    except Exception as e:
+        logger.warning(f"Users endpoint failed: {e}")
+
+    # Fallback: check Keycloak role mappings directly
+    if user_id:
+        try:
+            resp = http_requests.get(
+                f"{ATLAN_INSTANCE_URL}/auth/admin/realms/default/users/{user_id}/role-mappings/realm",
+                headers=headers,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                roles = [r.get("name", "") for r in resp.json()]
+                if "$admin" in roles:
+                    logger.info(f"Access granted for {username}: admin (keycloak)")
+                    return True, "admin"
+                if persona_role in roles:
+                    logger.info(f"Access granted for {username}: policy match (keycloak)")
+                    return True, "policy_match"
+                return False, "no_access"
+        except Exception as e:
+            logger.warning(f"Keycloak roles endpoint failed: {e}")
+
+    return False, "check_failed"
+
 
 class GenieClient:
     """Simplified Genie client for chat interface"""
@@ -163,6 +347,18 @@ def get_space_info(space_guid):
             'error': 'No authorization token provided. Please authenticate with Atlan.',
             'demo_available': True
         })
+
+    # Policy-based access check
+    if GENIE_ACCESS_POLICY_NAME:
+        allowed, username, reason = check_genie_access(token)
+        if not allowed:
+            logger.warning(f"Access denied for {username}: {reason}")
+            return jsonify({
+                'success': False,
+                'error': 'You do not have access to Genie spaces. '
+                         'Contact your Atlan admin to request the '
+                         f'"{GENIE_ACCESS_POLICY_NAME}" policy.'
+            }), 403
 
     try:
         # Fetch asset via Atlan REST API with user's OAuth token

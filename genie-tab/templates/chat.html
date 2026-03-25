@@ -524,6 +524,20 @@
                 });
                 const data = await response.json();
 
+                // Handle access denied
+                if (response.status === 403) {
+                    document.getElementById('loadingMessage').innerHTML = `
+                        <div style="text-align: center; padding: 40px;">
+                            <div style="font-size: 48px; margin-bottom: 15px;">🔒</div>
+                            <h3 style="color: #333;">Access Denied</h3>
+                            <p style="margin-top: 10px; color: #666; max-width: 400px; margin-left: auto; margin-right: auto;">
+                                ${data.error || 'You do not have permission to use Genie spaces.'}
+                            </p>
+                        </div>
+                    `;
+                    return;
+                }
+
                 if (data.success) {
                     currentSpaceId = data.space_id;
                     currentConversationId = null;  // Reset conversation

@@ -10,6 +10,8 @@
 
 - [ ] **Register OAuth redirect URI on databricks.atlan.com** — The Render URL (`https://databricks-atlan-com-genie-tab.onrender.com`) needs to be registered as a valid redirect URI in Atlan's Keycloak for standalone mode to work. Embedded mode (iframe) works without this.
 
+- [ ] **Fix "Open in Databricks" hyperlink** — The "Open in Databricks" link in the Genie tab UI currently doesn't work. Need to determine the correct Databricks URL format to open a Genie space directly (e.g., `https://{workspace}/genie/spaces/{space_id}` or similar). This is the same URL pattern needed by genie-assets for the README link on Atlan assets.
+
 ### Medium Priority
 
 - [ ] **UI refresh — Databricks branding** — Update colors from purple (#667eea) to Databricks red (#FF3621). Dark background (#1B3139), Databricks-themed bot avatar, "Powered by Databricks Genie" footer. Update user message bubbles, send button, focus states.
@@ -31,6 +33,10 @@
 - [ ] **Validate scripts against databricks.atlan.com** — Scripts were last tested against `partner-sandbox.atlan.com`. Need to run the full workflow (01-04) against the new instance.
 
 - [ ] **Review and clean up scripts** — The scripts were copied from the original project. May need updates for the new Atlan instance, connection names, etc.
+
+- [ ] **Update asset icon to Databricks icon** — Set `connection.asset_icon = "https://assets.atlan.com/assets/databricks.svg"` in the relevant script so Genie assets display the Databricks logo in Atlan.
+
+- [ ] **Fix "Open in Databricks" link on Genie assets** — The README or link on each Genie asset in Atlan should include a working "Open in Databricks" URL that takes users directly to the Genie space. Need to determine the correct Databricks URL format (same URL pattern needed by genie-tab). Once known, set it in the asset metadata during sync.
 
 ### Medium Priority
 

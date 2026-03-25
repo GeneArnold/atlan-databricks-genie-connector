@@ -1,0 +1,10 @@
+# Core dependencies for Databricks Genie Space Connector
+requests>=2.31.0
+python-dotenv>=1.0.0
+rich>=13.0.0
+
+# Atlan integration
+pyatlan>=2.0.0
+
+# Future dependencies for Temporal workflows
+# temporalio>=1.0.0

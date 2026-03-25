@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genie Chat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .logo {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .space-info h1 {
+            font-size: 18px;
+            color: #333;
+            margin: 0;
+        }
+
+        .space-info .status {
+            font-size: 12px;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-top: 2px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: #10b981;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .databricks-link {
+            background: #ff3621;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .databricks-link:hover {
+            background: #e02e1c;
+        }
+
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            margin: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            display: flex;
+            gap: 10px;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .message.user .message-avatar {
+            background: #667eea;
+            color: white;
+        }
+
+        .message.assistant .message-avatar {
+            background: #f3f4f6;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .message.user .message-content {
+            background: #667eea;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant .message-content {
+            background: #f3f4f6;
+            color: #333;
+            border-bottom-left-radius: 4px;
+        }
+
+        .sql-container {
+            margin-top: 10px;
+            padding: 10px;
+            background: #1e293b;
+            color: #94a3b8;
+            border-radius: 6px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+        }
+
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            padding: 15px;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background: #9ca3af;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-10px); }
+        }
+
+        .input-container {
+            padding: 20px;
+            border-top: 1px solid #e5e7eb;
+            background: #fafafa;
+        }
+
+        .input-form {
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-field {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-field:focus {
+            border-color: #667eea;
+        }
+
+        .send-button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .send-button:hover {
+            background: #5a67d8;
+        }
+
+        .send-button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .welcome-message {
+            text-align: center;
+            padding: 40px;
+            color: #6b7280;
+        }
+
+        .welcome-message h2 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .sample-questions {
+            margin-top: 20px;
+        }
+
+        .sample-question {
+            display: inline-block;
+            margin: 5px;
+            padding: 8px 12px;
+            background: #f3f4f6;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .sample-question:hover {
+            background: #e5e7eb;
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c00;
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 13px;
+        }
+
+        .loading-message {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+
+    <!-- Atlan Auth SDK for OAuth -->
+    <script src="https://unpkg.com/@atlanhq/atlan-auth@latest/dist/atlan-auth.umd.min.js"></script>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <div class="logo">🤖</div>
+            <div class="space-info">
+                <h1 id="spaceName">Genie Chat</h1>
+                <div class="status">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Waiting for space context...</span>
+                </div>
+            </div>
+        </div>
+        <a id="databricksLink" href="#" target="_blank" class="databricks-link" style="display: none;">
+            <span>📊</span>
+            <span>Open in Databricks</span>
+        </a>
+    </div>
+
+    <div class="chat-container">
+        <div id="messages" class="messages">
+            <div class="loading-message" id="loadingMessage">
+                <div class="loading-spinner"></div>
+                <div>Waiting for Genie space context from Atlan...</div>
+                <div style="margin-top: 10px; font-size: 12px;">
+                    Select a Genie space asset in Atlan to start chatting
+                </div>
+            </div>
+        </div>
+
+        <div class="input-container">
+            <form id="chatForm" class="input-form" style="display: none;">
+                <input
+                    type="text"
+                    id="messageInput"
+                    class="input-field"
+                    placeholder="Ask a question about your data..."
+                    autocomplete="off"
+                />
+                <button type="submit" class="send-button">
+                    <span>Send</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Configuration — injected from Flask template
+        const ATLAN_INSTANCE_URL = '{{ atlan_instance_url }}';
+
+        let currentSpaceId = null;
+        let currentConversationId = null;
+        let isConfigured = false;
+        let authToken = null;
+        let assetGuidFromMessage = null;
+
+        // =============================================
+        // Helper: get auth headers for API calls
+        // =============================================
+        function getAuthHeaders() {
+            const headers = { 'Content-Type': 'application/json' };
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+            return headers;
+        }
+
+        // =============================================
+        // Raw postMessage listener — BEFORE SDK init
+        // Captures asset GUID that the SDK strips in embedded mode
+        // =============================================
+        window.addEventListener('message', (event) => {
+            const { type, payload } = event.data || {};
+
+            if (type === 'ATLAN_AUTH_CONTEXT') {
+                if (payload?.page?.params?.id) {
+                    assetGuidFromMessage = payload.page.params.id;
+                    console.log('[GENIE] Asset GUID captured from postMessage:', assetGuidFromMessage);
+                }
+            }
+        });
+
+        // =============================================
+        // Atlan Auth SDK initialization
+        // =============================================
+        function initializeAtlanAuth() {
+            console.log('[GENIE] Initializing Atlan Auth SDK...');
+            console.log('[GENIE] Target instance:', ATLAN_INSTANCE_URL);
+
+            try {
+                const { AtlanAuth } = window.AtlanAuthSDK;
+
+                const atlan = new AtlanAuth({
+                    origin: ATLAN_INSTANCE_URL,
+
+                    onReady: async (context) => {
+                        console.log('[GENIE] Authentication successful!');
+                        authToken = context.token || atlan.getToken();
+
+                        const mode = context.mode || 'unknown';
+                        const user = context.user || {};
+                        console.log('[GENIE] Mode:', mode, '| User:', user.username || 'N/A');
+
+                        // Update status
+                        document.getElementById('statusText').textContent = `Authenticated as ${user.username || user.name || 'user'}`;
+
+                        // Check Databricks config
+                        await checkConfiguration();
+
+                        // Determine asset GUID
+                        let spaceGuid = null;
+                        if (mode === 'embedded') {
+                            spaceGuid = assetGuidFromMessage;
+                        } else {
+                            spaceGuid = context.page?.params?.id || null;
+                        }
+
+                        if (spaceGuid) {
+                            await loadSpace(spaceGuid);
+                        } else {
+                            document.getElementById('loadingMessage').innerHTML = `
+                                <div style="text-align: center; padding: 40px; color: #666;">
+                                    <h3>Authenticated</h3>
+                                    <p style="margin-top: 10px;">Select a Genie space asset in Atlan to start chatting.</p>
+                                    <button onclick="loadSpace('demo-space-guid')" style="
+                                        margin-top: 15px;
+                                        padding: 10px 20px;
+                                        background: #667eea;
+                                        color: white;
+                                        border: none;
+                                        border-radius: 6px;
+                                        cursor: pointer;
+                                        font-size: 14px;
+                                    ">
+                                        Try Demo Mode
+                                    </button>
+                                </div>
+                            `;
+                        }
+                    },
+
+                    onError: (error) => {
+                        console.error('[GENIE] Authentication failed:', error);
+                        document.getElementById('statusText').textContent = 'Authentication failed';
+                        document.getElementById('loadingMessage').innerHTML = `
+                            <div style="color: #c00; text-align: center; padding: 40px;">
+                                <h3>Authentication Error</h3>
+                                <p style="margin-top: 10px;">${error.message || 'Failed to authenticate with Atlan.'}</p>
+                                <p style="margin-top: 10px; font-size: 12px; color: #666;">
+                                    If this is a redirect_uri error, the app URL needs to be registered in Atlan.
+                                </p>
+                                <button onclick="loadSpace('demo-space-guid')" style="
+                                    margin-top: 15px;
+                                    padding: 10px 20px;
+                                    background: #667eea;
+                                    color: white;
+                                    border: none;
+                                    border-radius: 6px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                ">
+                                    Try Demo Mode (no auth)
+                                </button>
+                            </div>
+                        `;
+                    }
+                });
+
+                atlan.init();
+            } catch (e) {
+                console.error('[GENIE] SDK init error:', e);
+                // SDK may fail — allow demo mode
+                document.getElementById('statusText').textContent = 'SDK unavailable';
+                checkConfiguration();
+            }
+        }
+
+        // Check configuration on load
+        async function checkConfiguration() {
+            try {
+                const response = await fetch('/api/config');
+                const data = await response.json();
+                isConfigured = data.configured;
+
+                if (!isConfigured) {
+                    document.getElementById('loadingMessage').innerHTML = `
+                        <div style="color: #c00;">
+                            <h3>Configuration Required</h3>
+                            <p style="margin-top: 10px;">
+                                Databricks Genie is not configured. Please set:
+                            </p>
+                            <ul style="text-align: left; display: inline-block; margin-top: 10px;">
+                                <li>DATABRICKS_WORKSPACE_URL</li>
+                                <li>DATABRICKS_TOKEN</li>
+                            </ul>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Configuration check failed:', error);
+            }
+        }
+
+        async function loadSpace(guid) {
+            if (!isConfigured) return;
+
+            try {
+                const response = await fetch(`/api/space/${guid}`, {
+                    headers: getAuthHeaders()
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    currentSpaceId = data.space_id;
+                    currentConversationId = null;  // Reset conversation
+
+                    // Update UI
+                    document.getElementById('spaceName').textContent = data.name;
+                    document.getElementById('statusText').textContent = 'Connected';
+                    document.getElementById('databricksLink').href = data.databricks_url;
+                    document.getElementById('databricksLink').style.display = 'flex';
+
+                    // Show welcome message
+                    document.getElementById('messages').innerHTML = `
+                        <div class="welcome-message">
+                            <h2>Welcome to ${data.name} Chat</h2>
+                            <p>${data.description}</p>
+                            <div class="sample-questions">
+                                <div class="sample-question" onclick="askQuestion('Show me top customers')">
+                                    Show me top customers
+                                </div>
+                                <div class="sample-question" onclick="askQuestion('What are the total sales?')">
+                                    What are the total sales?
+                                </div>
+                                <div class="sample-question" onclick="askQuestion('List all products')">
+                                    List all products
+                                </div>
+                            </div>
+                        </div>
+                    `;
+
+                    // Enable chat
+                    document.getElementById('chatForm').style.display = 'flex';
+                    document.getElementById('messageInput').focus();
+                } else {
+                    // Check if it's an authentication error
+                    let errorHtml = '';
+                    if (data.demo_available) {
+                        errorHtml = `
+                            <div style="color: #c00;">
+                                <h3>${data.error}</h3>
+                                <button onclick="loadSpace('demo-space-guid')" style="
+                                    margin-top: 15px;
+                                    padding: 10px 20px;
+                                    background: #667eea;
+                                    color: white;
+                                    border: none;
+                                    border-radius: 6px;
+                                    cursor: pointer;
+                                    font-size: 14px;
+                                ">
+                                    Try Demo Mode
+                                </button>
+                            </div>
+                        `;
+                    } else {
+                        errorHtml = `
+                            <div style="color: #c00;">
+                                ${data.error}
+                            </div>
+                        `;
+                    }
+                    document.getElementById('loadingMessage').innerHTML = errorHtml;
+                }
+            } catch (error) {
+                console.error('Failed to load space:', error);
+                document.getElementById('loadingMessage').innerHTML = `
+                    <div style="color: #c00;">
+                        Failed to load space: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        function askQuestion(question) {
+            document.getElementById('messageInput').value = question;
+            document.getElementById('chatForm').dispatchEvent(new Event('submit'));
+        }
+
+        function addMessage(content, isUser, sql = null) {
+            const messagesDiv = document.getElementById('messages');
+
+            // Clear welcome message if it exists
+            const welcome = messagesDiv.querySelector('.welcome-message');
+            if (welcome) welcome.remove();
+            const loading = messagesDiv.querySelector('.loading-message');
+            if (loading) loading.remove();
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user' : 'assistant'}`;
+
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = isUser ? '👤' : '🤖';
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.textContent = content;
+
+            if (sql) {
+                const sqlDiv = document.createElement('div');
+                sqlDiv.className = 'sql-container';
+                sqlDiv.textContent = sql;
+                contentDiv.appendChild(sqlDiv);
+            }
+
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentDiv);
+            messagesDiv.appendChild(messageDiv);
+
+            // Scroll to bottom
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function showTyping() {
+            const messagesDiv = document.getElementById('messages');
+            const typingDiv = document.createElement('div');
+            typingDiv.id = 'typing';
+            typingDiv.className = 'message assistant';
+            typingDiv.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div class="typing-indicator">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+            `;
+            messagesDiv.appendChild(typingDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function hideTyping() {
+            const typing = document.getElementById('typing');
+            if (typing) typing.remove();
+        }
+
+        // Handle form submission
+        document.getElementById('chatForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message || !currentSpaceId) return;
+
+            // Add user message
+            addMessage(message, true);
+            input.value = '';
+            input.disabled = true;
+
+            // Show typing indicator
+            showTyping();
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        space_id: currentSpaceId,
+                        message: message,
+                        conversation_id: currentConversationId
+                    })
+                });
+
+                const data = await response.json();
+                hideTyping();
+
+                if (data.success) {
+                    currentConversationId = data.conversation_id;
+                    addMessage(data.response, false, data.sql);
+                } else {
+                    addMessage(`Error: ${data.error}`, false);
+                }
+            } catch (error) {
+                hideTyping();
+                addMessage(`Error: ${error.message}`, false);
+            } finally {
+                input.disabled = false;
+                input.focus();
+            }
+        });
+
+        // Initialize on load
+        window.addEventListener('load', () => {
+            initializeAtlanAuth();
+        });
+    </script>
+</body>
+</html>

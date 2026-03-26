@@ -217,7 +217,7 @@
 
         .input-field {
             width: 100%;
-            padding: 12px 16px;
+            padding: 12px 36px 12px 16px;
             border: 2px solid #e5e7eb;
             border-radius: 8px;
             font-size: 14px;
@@ -227,6 +227,30 @@
 
         .input-field:focus {
             border-color: #667eea;
+        }
+
+        .suggestions-toggle {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px;
+            color: #9ca3af;
+            font-size: 18px;
+            line-height: 1;
+            transition: color 0.2s;
+            display: none;
+        }
+
+        .suggestions-toggle:hover {
+            color: #667eea;
+        }
+
+        .suggestions-toggle.active {
+            color: #667eea;
         }
 
         .suggestions-dropdown {
@@ -389,6 +413,7 @@
                         placeholder="Ask a question about your data..."
                         autocomplete="off"
                     />
+                    <button type="button" id="suggestionsToggle" class="suggestions-toggle" title="Sample questions">&#9650;</button>
                 </div>
                 <button type="submit" class="send-button">
                     <span>Send</span>
@@ -652,8 +677,15 @@
 
         function buildSuggestionsDropdown() {
             const dropdown = document.getElementById('suggestionsDropdown');
+            const toggle = document.getElementById('suggestionsToggle');
             dropdown.innerHTML = '';
-            if (!currentSampleQuestions.length) return;
+
+            if (!currentSampleQuestions.length) {
+                toggle.style.display = 'none';
+                return;
+            }
+
+            toggle.style.display = 'block';
 
             const label = document.createElement('div');
             label.className = 'suggestions-label';
@@ -664,8 +696,7 @@
                 const item = document.createElement('div');
                 item.className = 'suggestion-item';
                 item.textContent = q;
-                item.addEventListener('mousedown', (e) => {
-                    e.preventDefault(); // Prevent input blur
+                item.addEventListener('click', () => {
                     document.getElementById('messageInput').value = q;
                     hideSuggestions();
                     document.getElementById('messageInput').focus();
@@ -674,29 +705,33 @@
             }
         }
 
-        function showSuggestions() {
+        function toggleSuggestions() {
             const dropdown = document.getElementById('suggestionsDropdown');
-            const input = document.getElementById('messageInput');
-            if (currentSampleQuestions.length && !input.value.trim()) {
+            const toggle = document.getElementById('suggestionsToggle');
+            if (dropdown.classList.contains('visible')) {
+                hideSuggestions();
+            } else {
                 dropdown.classList.add('visible');
+                toggle.classList.add('active');
             }
         }
 
         function hideSuggestions() {
             document.getElementById('suggestionsDropdown').classList.remove('visible');
+            document.getElementById('suggestionsToggle').classList.remove('active');
         }
 
-        // Wire up input field to show/hide suggestions
-        document.getElementById('messageInput').addEventListener('focus', showSuggestions);
-        document.getElementById('messageInput').addEventListener('blur', () => {
-            // Small delay so mousedown on suggestion fires first
-            setTimeout(hideSuggestions, 150);
+        // Toggle button click
+        document.getElementById('suggestionsToggle').addEventListener('click', (e) => {
+            e.preventDefault();
+            toggleSuggestions();
         });
-        document.getElementById('messageInput').addEventListener('input', (e) => {
-            if (e.target.value.trim()) {
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const wrapper = document.querySelector('.input-wrapper');
+            if (!wrapper.contains(e.target)) {
                 hideSuggestions();
-            } else {
-                showSuggestions();
             }
         });
 

@@ -210,8 +210,13 @@
             gap: 10px;
         }
 
-        .input-field {
+        .input-wrapper {
             flex: 1;
+            position: relative;
+        }
+
+        .input-field {
+            width: 100%;
             padding: 12px 16px;
             border: 2px solid #e5e7eb;
             border-radius: 8px;
@@ -222,6 +227,52 @@
 
         .input-field:focus {
             border-color: #667eea;
+        }
+
+        .suggestions-dropdown {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            margin-bottom: 6px;
+            box-shadow: 0 -4px 16px rgba(0,0,0,0.1);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 10;
+        }
+
+        .suggestions-dropdown.visible {
+            display: block;
+        }
+
+        .suggestion-item {
+            padding: 10px 14px;
+            font-size: 13px;
+            color: #374151;
+            cursor: pointer;
+            border-bottom: 1px solid #f3f4f6;
+            line-height: 1.4;
+        }
+
+        .suggestion-item:last-child {
+            border-bottom: none;
+        }
+
+        .suggestion-item:hover {
+            background: #f3f4f6;
+        }
+
+        .suggestions-label {
+            padding: 8px 14px 4px;
+            font-size: 11px;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
         }
 
         .send-button {
@@ -261,21 +312,6 @@
 
         .sample-questions {
             margin-top: 20px;
-        }
-
-        .sample-question {
-            display: inline-block;
-            margin: 5px;
-            padding: 8px 12px;
-            background: #f3f4f6;
-            border-radius: 6px;
-            font-size: 13px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .sample-question:hover {
-            background: #e5e7eb;
         }
 
         .error-message {
@@ -344,13 +380,16 @@
 
         <div class="input-container">
             <form id="chatForm" class="input-form" style="display: none;">
-                <input
-                    type="text"
-                    id="messageInput"
-                    class="input-field"
-                    placeholder="Ask a question about your data..."
-                    autocomplete="off"
-                />
+                <div class="input-wrapper">
+                    <div id="suggestionsDropdown" class="suggestions-dropdown"></div>
+                    <input
+                        type="text"
+                        id="messageInput"
+                        class="input-field"
+                        placeholder="Ask a question about your data..."
+                        autocomplete="off"
+                    />
+                </div>
                 <button type="submit" class="send-button">
                     <span>Send</span>
                 </button>
@@ -365,6 +404,7 @@
         let currentSpaceId = null;
         let currentWorkspaceUrl = null;
         let currentConversationId = null;
+        let currentSampleQuestions = [];
         let isConfigured = false;
         let authToken = null;
         let assetGuidFromMessage = null;
@@ -543,6 +583,7 @@
                     currentSpaceId = data.space_id;
                     currentWorkspaceUrl = data.workspace_url || null;
                     currentConversationId = null;  // Reset conversation
+                    currentSampleQuestions = data.sample_questions || [];
 
                     // Update UI
                     document.getElementById('spaceName').textContent = data.name;
@@ -550,24 +591,14 @@
                     document.getElementById('databricksLink').href = data.databricks_url;
                     document.getElementById('databricksLink').style.display = 'flex';
 
-                    // Build sample questions HTML from API response
-                    let sampleQuestionsHtml = '';
-                    const questions = data.sample_questions || [];
-                    if (questions.length > 0) {
-                        sampleQuestionsHtml = '<div class="sample-questions">';
-                        for (const q of questions) {
-                            const escaped = q.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                            sampleQuestionsHtml += `<div class="sample-question" onclick="askQuestion('${escaped}')">${q}</div>`;
-                        }
-                        sampleQuestionsHtml += '</div>';
-                    }
+                    // Build suggestions dropdown
+                    buildSuggestionsDropdown();
 
                     // Show welcome message
                     document.getElementById('messages').innerHTML = `
                         <div class="welcome-message">
                             <h2>Welcome to ${data.name} Chat</h2>
                             <p>${data.description}</p>
-                            ${sampleQuestionsHtml}
                         </div>
                     `;
 
@@ -618,6 +649,56 @@
             document.getElementById('messageInput').value = question;
             document.getElementById('chatForm').dispatchEvent(new Event('submit'));
         }
+
+        function buildSuggestionsDropdown() {
+            const dropdown = document.getElementById('suggestionsDropdown');
+            dropdown.innerHTML = '';
+            if (!currentSampleQuestions.length) return;
+
+            const label = document.createElement('div');
+            label.className = 'suggestions-label';
+            label.textContent = 'Sample questions';
+            dropdown.appendChild(label);
+
+            for (const q of currentSampleQuestions) {
+                const item = document.createElement('div');
+                item.className = 'suggestion-item';
+                item.textContent = q;
+                item.addEventListener('mousedown', (e) => {
+                    e.preventDefault(); // Prevent input blur
+                    document.getElementById('messageInput').value = q;
+                    hideSuggestions();
+                    document.getElementById('messageInput').focus();
+                });
+                dropdown.appendChild(item);
+            }
+        }
+
+        function showSuggestions() {
+            const dropdown = document.getElementById('suggestionsDropdown');
+            const input = document.getElementById('messageInput');
+            if (currentSampleQuestions.length && !input.value.trim()) {
+                dropdown.classList.add('visible');
+            }
+        }
+
+        function hideSuggestions() {
+            document.getElementById('suggestionsDropdown').classList.remove('visible');
+        }
+
+        // Wire up input field to show/hide suggestions
+        document.getElementById('messageInput').addEventListener('focus', showSuggestions);
+        document.getElementById('messageInput').addEventListener('blur', () => {
+            // Small delay so mousedown on suggestion fires first
+            setTimeout(hideSuggestions, 150);
+        });
+        document.getElementById('messageInput').addEventListener('input', (e) => {
+            if (e.target.value.trim()) {
+                hideSuggestions();
+            } else {
+                showSuggestions();
+            }
+        });
 
         function addMessage(content, isUser, sql = null) {
             const messagesDiv = document.getElementById('messages');

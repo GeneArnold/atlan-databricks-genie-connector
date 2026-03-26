@@ -4,13 +4,13 @@
 
 ### High Priority
 
-- [ ] **Persona-based access gating** — After OAuth, fetch user's personas from Atlan API. If user doesn't have access to the required persona, block the Genie chat. Need to discover the correct Atlan API endpoint for personas (tried `/api/service/personas`, `/api/meta/user/current`, `/api/service/accesscontrol` — need to test which returns useful data).
+- [x] **Policy-based access gating** — *(Completed 2026-03-25)* Implemented in `app.py`. Searches for the "Genie Space Access" AuthPolicy by name via indexsearch, resolves the parent persona's Keycloak role, then checks if the OAuth user has that role. Admins (`$admin`) bypass automatically. Uses the user's OAuth token for all API calls (no server-side API key). Includes caching (5-min TTL) and multiple fallback paths (users API → Keycloak roles → JWT decode). Frontend shows a lock/access denied screen on 403. Env var `GENIE_ACCESS_POLICY_NAME` controls the policy name (default: "Genie Space Access").
 
 - [ ] **Databricks OAuth M2M** — Replace the Databricks Personal Access Token (PAT) with OAuth service principal credentials. Use client_credentials grant against `https://{workspace}/oidc/v1/token`. Requires creating a service principal in Databricks Account Console, generating an OAuth secret, and granting it access to Genie spaces + SQL warehouse + Unity Catalog tables. The `databricks-sdk` Python package handles automatic token refresh. See research notes in the project memory.
 
 - [ ] **Register OAuth redirect URI on databricks.atlan.com** — The Render URL (`https://databricks-atlan-com-genie-tab.onrender.com`) needs to be registered as a valid redirect URI in Atlan's Keycloak for standalone mode to work. Embedded mode (iframe) works without this.
 
-- [ ] **Fix "Open in Databricks" hyperlink** — The "Open in Databricks" link in the Genie tab UI currently doesn't work. Need to determine the correct Databricks URL format to open a Genie space directly (e.g., `https://{workspace}/genie/spaces/{space_id}` or similar). This is the same URL pattern needed by genie-assets for the README link on Atlan assets.
+- [ ] **Fix "Open in Databricks" hyperlink** — The "Open in Databricks" link in the Genie tab UI currently doesn't work. Need to determine the correct Databricks URL format to open a Genie space directly (e.g., `https://{workspace}/genie/rooms/{space_id}` or similar). This is the same URL pattern needed by genie-assets for the README link on Atlan assets.
 
 ### Medium Priority
 
@@ -30,19 +30,27 @@
 
 ### High Priority
 
-- [ ] **Validate scripts against databricks.atlan.com** — Scripts were last tested against `partner-sandbox.atlan.com`. Need to run the full workflow (01-04) against the new instance.
+- [x] **Validate scripts against databricks.atlan.com** — *(Completed 2026-03-26)* All 4 scripts updated and tested. Scripts are now idempotent — they detect existing connections, custom metadata, and entities before creating. Adapted for PyAtlan v4.2.5 API changes. Connection icon set to Databricks SVG. Extracted 8 Genie Spaces, created 2 new + updated 5 existing entities with custom metadata and READMEs.
 
-- [ ] **Review and clean up scripts** — The scripts were copied from the original project. May need updates for the new Atlan instance, connection names, etc.
+- [x] **Review and clean up scripts** — *(Completed 2026-03-26)* Removed hardcoded workspace URLs, sample/demo data fallbacks, and Wide World Importers-specific code. All scripts use .env vars. Script 03 auto-discovers connection QN. Script 04 generalized for any Genie Space.
 
-- [ ] **Update asset icon to Databricks icon** — Set `connection.asset_icon = "https://assets.atlan.com/assets/databricks.svg"` in the relevant script so Genie assets display the Databricks logo in Atlan.
+- [x] **Update asset icon to Databricks icon** — *(Completed 2026-03-26)* Script 01 now sets `connection.asset_icon = "https://assets.atlan.com/assets/databricks.svg"`. Icon applied to the existing connection on databricks.atlan.com.
 
-- [ ] **Fix "Open in Databricks" link on Genie assets** — The README or link on each Genie asset in Atlan should include a working "Open in Databricks" URL that takes users directly to the Genie space. Need to determine the correct Databricks URL format (same URL pattern needed by genie-tab). Once known, set it in the asset metadata during sync.
+- [x] **Lineage script generalization** — *(Completed 2026-03-26)* Replaced `04_create_lineage_wide_world.py` with `04_create_lineage.py`. Works for any/all Genie Spaces, auto-discovers connections, looks up tables dynamically. Supports targeting a single space via CLI arg.
+
+- [x] **Run lineage after Databricks connector crawl** — *(Completed 2026-03-26)* Lineage created for 5 of 7 spaces (20 table connections total). Finance DW (5 tables), Wide World Importers (4 tables x2), FinServ Compliance (4 tables), Revenue Analytics (3 tables). 2 spaces skipped (kdrp_mv and sales_metrics tables not crawled).
+
+- [ ] **Fix "Open in Databricks" link on Genie assets** — The README on each Genie asset currently uses `{DATABRICKS_HOST}/genie/rooms/{space_id}` as the link format. Need to verify this is the correct URL pattern. Once confirmed, this is done.
 
 ### Medium Priority
 
-- [ ] **Automate sync** — Currently manual CLI execution. Consider scheduled runs (cron, Temporal, or Databricks Jobs) to keep Atlan assets in sync with Genie Spaces.
+- [ ] **Polish README template** — The README template now includes all the right data (tables with column counts, sample questions, SQL examples, instructions, links). Needs visual cleanup to look cleaner and more professional — better formatting, spacing, section styling.
 
-- [ ] **Lineage script generalization** — `04_create_lineage_wide_world.py` is hardcoded for the "Wide World Importers" demo space. Needs to be generalized for any Genie Space.
+- [ ] **Populate totalQueries / uniqueUsers / avgResponseTime** — These 3 custom metadata fields are empty because the Genie Spaces API doesn't expose usage metrics. Options: (1) pull from Databricks SQL query history API (`/api/2.0/sql/history/queries`) filtering by warehouse ID, (2) query Unity Catalog audit system tables (`system.access.audit`), or (3) populate with representative demo values.
+
+- [x] **Handle deleted Genie Spaces** — *(Completed 2026-03-26)* Script 03 now compares Atlan entities against Databricks spaces after sync and deletes orphaned entities.
+
+- [ ] **Automate sync** — Currently manual CLI execution. Consider scheduled runs (cron, Temporal, or Databricks Jobs) to keep Atlan assets in sync with Genie Spaces.
 
 ### Low Priority
 

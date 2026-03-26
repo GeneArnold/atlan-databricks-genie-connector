@@ -34,10 +34,34 @@ CORS(app, origins=[
 ])
 
 # Configuration from environment
-DATABRICKS_WORKSPACE_URL = os.getenv('DATABRICKS_WORKSPACE_URL', '')
-DATABRICKS_TOKEN = os.getenv('DATABRICKS_TOKEN', '')
 ATLAN_INSTANCE_URL = os.getenv('ATLAN_INSTANCE_URL', 'https://databricks.atlan.com')
 GENIE_ACCESS_POLICY_NAME = os.getenv('GENIE_ACCESS_POLICY_NAME', 'Genie Space Access')
+
+# Databricks workspace configuration — supports multiple workspaces
+# Option 1: DATABRICKS_WORKSPACES env var (JSON array of {url, token} objects)
+# Option 2: Legacy single-workspace DATABRICKS_WORKSPACE_URL + DATABRICKS_TOKEN
+DATABRICKS_WORKSPACES = {}  # {normalized_url: token}
+_workspaces_json = os.getenv('DATABRICKS_WORKSPACES', '')
+if _workspaces_json:
+    try:
+        for ws in json.loads(_workspaces_json):
+            url = ws['url'].rstrip('/')
+            DATABRICKS_WORKSPACES[url] = ws['token']
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.error(f"Failed to parse DATABRICKS_WORKSPACES: {e}")
+
+# Fallback: single workspace from legacy env vars
+_legacy_url = os.getenv('DATABRICKS_WORKSPACE_URL', '')
+_legacy_token = os.getenv('DATABRICKS_TOKEN', '')
+if _legacy_url and _legacy_token:
+    DATABRICKS_WORKSPACES.setdefault(_legacy_url.rstrip('/'), _legacy_token)
+
+if DATABRICKS_WORKSPACES:
+    logger.info(f"Configured {len(DATABRICKS_WORKSPACES)} Databricks workspace(s)")
+    for url in DATABRICKS_WORKSPACES:
+        logger.info(f"  - {url}")
+else:
+    logger.warning("No Databricks workspaces configured")
 
 # Cache for policy-to-role mapping and user access results
 _genie_persona_role_cache = None
@@ -315,10 +339,22 @@ class GenieClient:
 
         return {"status": "timeout", "error": "Response timeout"}
 
-# Initialize Genie client
-genie_client = None
-if DATABRICKS_WORKSPACE_URL and DATABRICKS_TOKEN:
-    genie_client = GenieClient(DATABRICKS_WORKSPACE_URL, DATABRICKS_TOKEN)
+# Initialize Genie clients — one per workspace
+genie_clients = {}  # {normalized_url: GenieClient}
+for ws_url, ws_token in DATABRICKS_WORKSPACES.items():
+    genie_clients[ws_url] = GenieClient(ws_url, ws_token)
+
+def get_genie_client(workspace_url: Optional[str] = None) -> Optional[GenieClient]:
+    """Get the GenieClient for a workspace URL, or the first available one as fallback."""
+    if workspace_url:
+        normalized = workspace_url.rstrip('/')
+        if normalized in genie_clients:
+            return genie_clients[normalized]
+        logger.warning(f"No token configured for workspace: {normalized}")
+    # Fallback to first configured workspace
+    if genie_clients:
+        return next(iter(genie_clients.values()))
+    return None
 
 @app.route('/')
 def index():
@@ -331,12 +367,15 @@ def get_space_info(space_guid):
 
     # Demo mode fallback
     if space_guid == 'demo-space-guid':
+        demo_ws = next(iter(genie_clients), '')
         return jsonify({
             'success': True,
             'space_id': '01f10ea33fc010dcb2dc604b75ac4336',
             'name': 'Wide World Importers Sales (Demo)',
             'description': 'Demo Genie space for testing',
-            'databricks_url': f"{DATABRICKS_WORKSPACE_URL}/genie/spaces/01f10ea33fc010dcb2dc604b75ac4336"
+            'workspace_url': demo_ws,
+            'databricks_url': f"{demo_ws}/genie/spaces/01f10ea33fc010dcb2dc604b75ac4336",
+            'sample_questions': []
         })
 
     # Extract OAuth Bearer token from frontend
@@ -429,12 +468,34 @@ def get_space_info(space_guid):
                     break
 
         if databricks_space_id:
+            # Extract workspace URL from metadata (workspaceUrl field)
+            workspace_url = None
+            sample_questions = []
+            if genie_metadata:
+                for fkey, fval in genie_metadata.items():
+                    if isinstance(fval, str) and fval.startswith('https://') and '.cloud.databricks.com' in fval:
+                        workspace_url = fval.rstrip('/')
+                    elif isinstance(fval, str) and fval.startswith('['):
+                        # Likely JSON-encoded sample questions
+                        try:
+                            parsed = json.loads(fval)
+                            if isinstance(parsed, list) and parsed:
+                                sample_questions = parsed
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+
+            # Fall back to first configured workspace if not in metadata
+            if not workspace_url and genie_clients:
+                workspace_url = next(iter(genie_clients))
+
             return jsonify({
                 'success': True,
                 'space_id': databricks_space_id,
                 'name': attributes.get('name') or entity.get('displayText') or 'Genie Space',
                 'description': attributes.get('userDescription') or attributes.get('description') or 'Databricks Genie space for data analysis',
-                'databricks_url': f"{DATABRICKS_WORKSPACE_URL}/genie/spaces/{databricks_space_id}"
+                'workspace_url': workspace_url or '',
+                'databricks_url': f"{workspace_url or ''}/genie/spaces/{databricks_space_id}",
+                'sample_questions': sample_questions[:5]
             })
         else:
             return jsonify({
@@ -464,29 +525,31 @@ def get_space_info(space_guid):
 @app.route('/api/chat', methods=['POST'])
 def chat():
     """Process chat message with Genie"""
-    if not genie_client:
-        return jsonify({
-            'success': False,
-            'error': 'Genie not configured. Set DATABRICKS_WORKSPACE_URL and DATABRICKS_TOKEN.'
-        }), 503
-
     data = request.json
     space_id = data.get('space_id')
     message = data.get('message')
     conversation_id = data.get('conversation_id')
+    workspace_url = data.get('workspace_url')
 
     if not space_id or not message:
         return jsonify({'success': False, 'error': 'Missing space_id or message'}), 400
 
+    client = get_genie_client(workspace_url)
+    if not client:
+        return jsonify({
+            'success': False,
+            'error': 'No Databricks workspace configured for this Genie space.'
+        }), 503
+
     try:
         # Start or continue conversation
         if not conversation_id:
-            conversation_id, message_id = genie_client.start_conversation(space_id, message)
+            conversation_id, message_id = client.start_conversation(space_id, message)
         else:
-            message_id = genie_client.continue_conversation(space_id, conversation_id, message)
+            message_id = client.continue_conversation(space_id, conversation_id, message)
 
         # Wait for response
-        result = genie_client.wait_for_response(space_id, conversation_id, message_id)
+        result = client.wait_for_response(space_id, conversation_id, message_id)
 
         if result["status"] == "completed":
             return jsonify({
@@ -511,8 +574,8 @@ def chat():
 def get_config():
     """Check configuration status"""
     return jsonify({
-        'configured': bool(DATABRICKS_WORKSPACE_URL and DATABRICKS_TOKEN),
-        'workspace_url': DATABRICKS_WORKSPACE_URL[:30] + '...' if DATABRICKS_WORKSPACE_URL else None
+        'configured': bool(genie_clients),
+        'workspace_count': len(genie_clients)
     })
 
 @app.route('/health')

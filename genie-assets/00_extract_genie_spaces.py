@@ -359,11 +359,11 @@ def main():
     ))
 
     # Configuration
-    DATABRICKS_URL = "https://dbc-8d941db8-48cd.cloud.databricks.com"
+    DATABRICKS_URL = os.getenv("DATABRICKS_HOST")
     DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
 
-    if not DATABRICKS_TOKEN:
-        console.print("[red]❌ Error: DATABRICKS_TOKEN not found in .env file[/red]")
+    if not DATABRICKS_URL or not DATABRICKS_TOKEN:
+        console.print("[red]❌ Error: DATABRICKS_HOST and DATABRICKS_TOKEN must be set in .env[/red]")
         return
 
     # Initialize client

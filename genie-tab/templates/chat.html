@@ -363,6 +363,7 @@
         const ATLAN_INSTANCE_URL = '{{ atlan_instance_url }}';
 
         let currentSpaceId = null;
+        let currentWorkspaceUrl = null;
         let currentConversationId = null;
         let isConfigured = false;
         let authToken = null;
@@ -540,6 +541,7 @@
 
                 if (data.success) {
                     currentSpaceId = data.space_id;
+                    currentWorkspaceUrl = data.workspace_url || null;
                     currentConversationId = null;  // Reset conversation
 
                     // Update UI
@@ -548,22 +550,24 @@
                     document.getElementById('databricksLink').href = data.databricks_url;
                     document.getElementById('databricksLink').style.display = 'flex';
 
+                    // Build sample questions HTML from API response
+                    let sampleQuestionsHtml = '';
+                    const questions = data.sample_questions || [];
+                    if (questions.length > 0) {
+                        sampleQuestionsHtml = '<div class="sample-questions">';
+                        for (const q of questions) {
+                            const escaped = q.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                            sampleQuestionsHtml += `<div class="sample-question" onclick="askQuestion('${escaped}')">${q}</div>`;
+                        }
+                        sampleQuestionsHtml += '</div>';
+                    }
+
                     // Show welcome message
                     document.getElementById('messages').innerHTML = `
                         <div class="welcome-message">
                             <h2>Welcome to ${data.name} Chat</h2>
                             <p>${data.description}</p>
-                            <div class="sample-questions">
-                                <div class="sample-question" onclick="askQuestion('Show me top customers')">
-                                    Show me top customers
-                                </div>
-                                <div class="sample-question" onclick="askQuestion('What are the total sales?')">
-                                    What are the total sales?
-                                </div>
-                                <div class="sample-question" onclick="askQuestion('List all products')">
-                                    List all products
-                                </div>
-                            </div>
+                            ${sampleQuestionsHtml}
                         </div>
                     `;
 
@@ -696,7 +700,8 @@
                     body: JSON.stringify({
                         space_id: currentSpaceId,
                         message: message,
-                        conversation_id: currentConversationId
+                        conversation_id: currentConversationId,
+                        workspace_url: currentWorkspaceUrl
                     })
                 });
 

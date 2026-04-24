@@ -13,7 +13,7 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #ffffff;
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -37,12 +37,21 @@
         .logo {
             width: 40px;
             height: 40px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+        }
+
+        .logo img {
+            width: 32px;
+            height: 32px;
+            display: block;
+        }
+
+        .message.assistant .message-avatar img {
+            width: 20px;
+            height: 20px;
+            display: block;
         }
 
         .space-info h1 {
@@ -98,7 +107,7 @@
             background: white;
             margin: 20px;
             border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            border: 2px solid #000;
             overflow: hidden;
         }
 
@@ -138,7 +147,7 @@
         }
 
         .message.user .message-avatar {
-            background: #667eea;
+            background: #3366FF;
             color: white;
         }
 
@@ -155,7 +164,7 @@
         }
 
         .message.user .message-content {
-            background: #667eea;
+            background: #3366FF;
             color: white;
             border-bottom-right-radius: 4px;
         }
@@ -226,7 +235,7 @@
         }
 
         .input-field:focus {
-            border-color: #667eea;
+            border-color: #3366FF;
         }
 
         .suggestions-toggle {
@@ -246,11 +255,11 @@
         }
 
         .suggestions-toggle:hover {
-            color: #667eea;
+            color: #3366FF;
         }
 
         .suggestions-toggle.active {
-            color: #667eea;
+            color: #3366FF;
         }
 
         .suggestions-dropdown {
@@ -301,7 +310,7 @@
 
         .send-button {
             padding: 12px 24px;
-            background: #667eea;
+            background: #3366FF;
             color: white;
             border: none;
             border-radius: 8px;
@@ -315,7 +324,7 @@
         }
 
         .send-button:hover {
-            background: #5a67d8;
+            background: #2850cc;
         }
 
         .send-button:disabled {
@@ -358,7 +367,7 @@
             width: 20px;
             height: 20px;
             border: 2px solid #f3f3f3;
-            border-top: 2px solid #667eea;
+            border-top: 2px solid #3366FF;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin-right: 10px;
@@ -376,7 +385,7 @@
 <body>
     <div class="header">
         <div class="header-left">
-            <div class="logo">🤖</div>
+            <div class="logo"><img src="https://assets.atlan.com/assets/databricks.svg" alt="Databricks"></div>
             <div class="space-info">
                 <h1 id="spaceName">Genie Chat</h1>
                 <div class="status">
@@ -505,7 +514,7 @@
                                     <button onclick="loadSpace('demo-space-guid')" style="
                                         margin-top: 15px;
                                         padding: 10px 20px;
-                                        background: #667eea;
+                                        background: #3366FF;
                                         color: white;
                                         border: none;
                                         border-radius: 6px;
@@ -532,7 +541,7 @@
                                 <button onclick="loadSpace('demo-space-guid')" style="
                                     margin-top: 15px;
                                     padding: 10px 20px;
-                                    background: #667eea;
+                                    background: #3366FF;
                                     color: white;
                                     border: none;
                                     border-radius: 6px;
@@ -640,7 +649,7 @@
                                 <button onclick="loadSpace('demo-space-guid')" style="
                                     margin-top: 15px;
                                     padding: 10px 20px;
-                                    background: #667eea;
+                                    background: #3366FF;
                                     color: white;
                                     border: none;
                                     border-radius: 6px;
@@ -749,7 +758,11 @@
 
             const avatar = document.createElement('div');
             avatar.className = 'message-avatar';
-            avatar.textContent = isUser ? '👤' : '🤖';
+            if (isUser) {
+                avatar.textContent = '👤';
+            } else {
+                avatar.innerHTML = '<img src="https://assets.atlan.com/assets/databricks.svg" alt="Databricks">';
+            }
 
             const contentDiv = document.createElement('div');
             contentDiv.className = 'message-content';
@@ -776,7 +789,7 @@
             typingDiv.id = 'typing';
             typingDiv.className = 'message assistant';
             typingDiv.innerHTML = `
-                <div class="message-avatar">🤖</div>
+                <div class="message-avatar"><img src="https://assets.atlan.com/assets/databricks.svg" alt="Databricks"></div>
                 <div class="typing-indicator">
                     <div class="typing-dot"></div>
                     <div class="typing-dot"></div>

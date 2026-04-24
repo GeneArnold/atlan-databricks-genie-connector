@@ -118,83 +118,65 @@ print("=" * 70)
 
 
 def extract_metadata_from_serialized(serialized_space) -> Dict:
-    """Extract metadata from serialized_space field."""
+    """Extract metadata from a v2 serialized_space payload.
+
+    v2 shape:
+      { version: 2,
+        config:       { sample_questions: [{id, question:[str]}] },
+        data_sources: { tables: [...], metric_views: [{identifier}] },
+        instructions: { text_instructions: [{id, content:[str]}],
+                        join_specs: [...],
+                        sql_snippets: { filters, measures, dimensions } } }
+    """
     if isinstance(serialized_space, str):
         try:
             serialized_space = json.loads(serialized_space)
         except (json.JSONDecodeError, TypeError):
             return create_empty_metadata()
-
     if not isinstance(serialized_space, dict):
         return create_empty_metadata()
 
-    metadata = create_empty_metadata()
+    meta = create_empty_metadata()
 
-    # Extract data sources and tables
-    data_sources = serialized_space.get("data_sources", {})
-    if isinstance(data_sources, dict):
-        metadata["tables"] = data_sources.get("tables", []) or data_sources.get("metric_views", [])
-        metadata["table_descriptions"] = data_sources.get("table_descriptions", {})
-        metadata["column_configs"] = data_sources.get("column_configurations", [])
+    ds = serialized_space.get("data_sources") or {}
+    if isinstance(ds, dict):
+        meta["tables"]       = ds.get("tables") or []
+        meta["metric_views"] = ds.get("metric_views") or []
 
-    # Extract instructions
-    if "text_instructions" in serialized_space:
-        metadata["instructions"] = serialized_space["text_instructions"]
-    elif "instructions" in serialized_space and isinstance(serialized_space["instructions"], dict):
-        instr = serialized_space["instructions"]
-        if "example_question_sqls" in instr:
-            all_text = []
-            for item in instr["example_question_sqls"]:
-                all_text.extend(item.get("question", []))
-                all_text.extend(item.get("sql", []))
-            metadata["instructions"] = "".join(all_text)
+    for q in (serialized_space.get("config") or {}).get("sample_questions", []):
+        if isinstance(q, dict):
+            meta["sample_questions"].append(" ".join(q.get("question") or []))
+        elif isinstance(q, str):
+            meta["sample_questions"].append(q)
 
-    # Extract sample questions
-    if "sample_questions" in serialized_space:
-        metadata["sample_questions"] = serialized_space["sample_questions"]
-    elif "config" in serialized_space:
-        raw_questions = serialized_space.get("config", {}).get("sample_questions", [])
-        for q in raw_questions:
-            if isinstance(q, dict) and "question" in q:
-                metadata["sample_questions"].append(" ".join(q["question"]))
-            elif isinstance(q, str):
-                metadata["sample_questions"].append(q)
+    instr = serialized_space.get("instructions") or {}
+    if isinstance(instr, dict):
+        text_blocks = []
+        for block in instr.get("text_instructions") or []:
+            if isinstance(block, dict):
+                text_blocks.append("".join(block.get("content") or []))
+        meta["instructions"] = "\n\n".join(b for b in text_blocks if b) or None
 
-    # Extract SQL examples
-    if "sql_examples" in serialized_space:
-        metadata["example_sql"] = serialized_space["sql_examples"]
-    elif "instructions" in serialized_space and isinstance(serialized_space["instructions"], dict):
-        metadata["example_sql"] = serialized_space["instructions"].get("example_question_sqls", [])
+        meta["join_specs"]      = instr.get("join_specs") or []
+        meta["example_queries"] = instr.get("example_question_sqls") or []
 
-    # Extract SQL snippets
-    for snippet in serialized_space.get("sql_snippets", []):
-        snippet_type = snippet.get("type", "unknown")
-        if snippet_type == "filter":
-            metadata["filters"].append(snippet)
-        elif snippet_type == "measure":
-            metadata["measures"].append(snippet)
-        elif snippet_type == "dimension":
-            metadata["dimensions"].append(snippet)
-        else:
-            metadata["sql_snippets"].append(snippet)
+        snippets = instr.get("sql_snippets") or {}
+        if isinstance(snippets, dict):
+            meta["filters"]    = snippets.get("filters") or []
+            meta["measures"]   = snippets.get("measures") or []
+            meta["dimensions"] = snippets.get("dimensions") or []
 
-    # Extract join specifications
-    metadata["join_specs"] = serialized_space.get("join_specifications", [])
-
-    return metadata
+    return meta
 
 
 def create_empty_metadata() -> Dict:
-    """Create empty metadata structure."""
     return {
         "tables": [],
-        "table_descriptions": {},
-        "column_configs": [],
+        "metric_views": [],
         "sample_questions": [],
         "instructions": None,
-        "example_sql": [],
         "join_specs": [],
-        "sql_snippets": [],
+        "example_queries": [],
         "filters": [],
         "measures": [],
         "dimensions": [],
@@ -214,8 +196,12 @@ def extract_from_workspace(host: str, token: str, workspace_name: str) -> List[D
     response = requests.get(list_url, headers=headers, timeout=30)
     response.raise_for_status()
 
+    # Databricks returns the workspace org id (the `?o=` share-URL param) as a
+    # response header on every API call. Capture it once for use in README links.
+    workspace_org_id = response.headers.get("x-databricks-org-id", "")
+
     spaces = response.json().get("spaces", [])
-    print(f"   ✅ Found {len(spaces)} Genie Space(s)")
+    print(f"   ✅ Found {len(spaces)} Genie Space(s)  (org id: {workspace_org_id or 'unknown'})")
 
     # Get detailed info for each space
     detailed_spaces = []
@@ -236,6 +222,7 @@ def extract_from_workspace(host: str, token: str, workspace_name: str) -> List[D
                     space[key] = detailed[key]
             space["_workspace_name"] = workspace_name
             space["_workspace_host"] = host
+            space["_workspace_org_id"] = workspace_org_id
 
             metadata = extract_metadata_from_serialized(detailed.get("serialized_space", {}))
             detailed_spaces.append({
@@ -295,137 +282,167 @@ except Exception as e:
 
 
 def generate_readme(basic_info: Dict, metadata: Dict) -> str:
-    """Generate rich README content for a Genie Space, matching the original template."""
+    """Generate README content for a Genie Space (v2 payload shape)."""
     title = basic_info.get("title", "Unknown")
     space_id = basic_info.get("space_id", "N/A")
     warehouse_id = basic_info.get("warehouse_id", "N/A")
     workspace_host = basic_info.get("_workspace_host", "")
+    workspace_org_id = basic_info.get("_workspace_org_id", "")
     created_by = basic_info.get("parent_path", "").replace("/Users/", "") or "Unknown"
 
-    content = f"# ✨ {title}\n\n"
-    content += "## 📊 Quick Overview\n\n"
-    content += "Databricks Genie AI-powered analytics space for natural language data querying and exploration.\n\n"
+    lines: List[str] = []
 
-    # ── Tables section with column details ──
+    def section(heading: str) -> None:
+        if lines:
+            lines.extend(["", "", "---", "", ""])
+        lines.append(f"## {heading}")
+        lines.extend(["", ""])
+
+    # Header
+    lines.append(f"# {title}")
+    lines.extend(["", ""])
+    lines.append("Databricks Genie AI-powered analytics space for natural language data querying and exploration.")
+
+    # Tables
     tables = metadata.get("tables", [])
-    content += f"## 📋 Tables Used ({len(tables)})\n\n"
-
+    section(f"Tables Used ({len(tables)})")
     if tables:
-        for table in tables:
-            if isinstance(table, dict):
-                table_name = table.get("identifier", table.get("name", str(table)))
-                columns = table.get("column_configs", [])
-                col_count = len(columns)
-                entity_count = sum(1 for c in columns if c.get("enable_entity_matching"))
-
-                col_info = f"{col_count} columns"
-                if entity_count:
-                    col_info += f" ({entity_count} with entity matching)"
-                content += f"- **{table_name}** - {col_info}\n"
-            else:
-                content += f"- **{table}**\n"
-        content += "\n"
+        for t in tables:
+            if not isinstance(t, dict):
+                lines.append(f"- **{t}**")
+                lines.append("")
+                continue
+            ident = t.get("identifier") or t.get("name") or str(t)
+            cols = t.get("column_configs") or []
+            col_word = "column" if len(cols) == 1 else "columns"
+            desc = t.get("description") or []
+            desc_text = desc[0] if isinstance(desc, list) and desc else (desc if isinstance(desc, str) else "")
+            lines.append(f"- **{ident}** — {len(cols)} {col_word}")
+            if desc_text:
+                lines.append("")
+                lines.append(f"  > {desc_text}")
+            lines.append("")
     else:
-        content += "No tables configured\n\n"
+        lines.append("_No tables configured_")
 
-    # ── Sample Questions ──
+    # Metric Views
+    metric_views = metadata.get("metric_views", [])
+    if metric_views:
+        section(f"Metric Views ({len(metric_views)})")
+        for mv in metric_views:
+            ident = mv.get("identifier") if isinstance(mv, dict) else str(mv)
+            lines.append(f"- **{ident}**")
+
+    # Sample Questions
     questions = metadata.get("sample_questions", [])
-    content += "## ❓ Sample Questions\n\n"
+    section(f"Sample Questions ({len(questions)})")
     if questions:
-        for i, question in enumerate(questions, 1):
-            content += f"{i}. {question}\n"
-        content += "\n"
+        for i, q in enumerate(questions, 1):
+            lines.append(f"{i}. {q}")
     else:
-        content += "No sample questions available\n\n"
+        lines.append("_No sample questions configured_")
 
-    # ── Example SQL Queries ──
-    example_sql = metadata.get("example_sql", [])
-    content += "## 💻 Example SQL Queries\n\n"
-    if example_sql:
-        for ex in example_sql:
-            if isinstance(ex, dict):
-                question_parts = ex.get("question", [])
-                sql_parts = ex.get("sql", [])
-                question_text = " ".join(question_parts) if isinstance(question_parts, list) else str(question_parts)
-                sql_text = "".join(sql_parts) if isinstance(sql_parts, list) else str(sql_parts)
+    # Example Queries — saved question + verified SQL pairs
+    example_queries = metadata.get("example_queries", [])
+    if example_queries:
+        section(f"Example Queries ({len(example_queries)})")
+        for i, eq in enumerate(example_queries):
+            if not isinstance(eq, dict):
+                continue
+            if i > 0:
+                lines.extend(["", ""])
+            q_parts = eq.get("question") or []
+            q_text = " ".join(q_parts).strip() if isinstance(q_parts, list) else str(q_parts).strip()
+            sql_parts = eq.get("sql") or []
+            sql_text = "".join(sql_parts).strip() if isinstance(sql_parts, list) else str(sql_parts).strip()
+            lines.append(f"### {q_text or 'Example'}")
+            lines.append("")
+            if sql_text:
+                lines.append("```sql")
+                lines.append(sql_text)
+                lines.append("```")
 
-                content += f"**Q: {question_text}**\n\n"
-                content += f"```sql\n{sql_text.strip()}\n```\n\n"
-            else:
-                content += f"- {ex}\n"
-        content += "\n"
-    else:
-        content += "No SQL examples available\n\n"
-
-    # ── Instructions & Business Logic ──
+    # Business Context — full text_instructions verbatim
     instructions = metadata.get("instructions")
-    content += "## 📚 Instructions & Business Logic\n\n"
     if instructions:
-        # Clean up: the instructions field sometimes contains concatenated SQL from example_question_sqls
-        # Show a reasonable preview
-        preview = str(instructions)
-        if len(preview) > 1000:
-            preview = preview[:1000] + "..."
-        content += f"{preview}\n\n"
-    else:
-        content += "No detailed instructions configured\n\n"
+        section("Business Context")
+        lines.append(str(instructions).strip())
 
-    # ── SQL Components (filters, measures, dimensions) ──
-    filters = metadata.get("filters", [])
-    measures = metadata.get("measures", [])
+    # Table Relationships
+    joins = metadata.get("join_specs", [])
+    if joins:
+        section(f"Table Relationships ({len(joins)})")
+        for idx, j in enumerate(joins):
+            if not isinstance(j, dict):
+                continue
+            if idx > 0:
+                lines.extend(["", ""])
+            left  = j.get("left") or {}
+            right = j.get("right") or {}
+            left_id  = left.get("identifier")  if isinstance(left, dict)  else str(left)
+            right_id = right.get("identifier") if isinstance(right, dict) else str(right)
+            instr_text   = " ".join(j.get("instruction") or []).strip()
+            comment_text = " ".join(j.get("comment") or []).strip()
+            sql_parts = j.get("sql") or []
+            lines.append(f"### `{left_id}` ⟷ `{right_id}`")
+            lines.append("")
+            if instr_text:
+                lines.append(f"**Join type:** {instr_text}")
+                lines.append("")
+            if comment_text:
+                lines.append(f"**Comment:** {comment_text}")
+                lines.append("")
+            if sql_parts:
+                sql_text = " AND ".join(s.strip() for s in sql_parts if s and s.strip())
+                if sql_text:
+                    lines.append("```sql")
+                    lines.append(sql_text)
+                    lines.append("```")
+
+    # SQL Library — filters, measures, dimensions
+    filters    = metadata.get("filters", [])
+    measures   = metadata.get("measures", [])
     dimensions = metadata.get("dimensions", [])
-    join_specs = metadata.get("join_specs", [])
+    if filters or measures or dimensions:
+        section("SQL Library")
+        first_subsection = True
+        for label, items in (("Filters", filters), ("Measures", measures), ("Dimensions", dimensions)):
+            if not items:
+                continue
+            if not first_subsection:
+                lines.extend(["", ""])
+            first_subsection = False
+            lines.append(f"### {label} ({len(items)})")
+            lines.append("")
+            for i, it in enumerate(items):
+                if not isinstance(it, dict):
+                    continue
+                if i > 0:
+                    lines.append("")
+                name = it.get("display_name") or it.get("alias") or it.get("id", "unnamed")
+                sql_parts = it.get("sql") or []
+                sql_text = "\n".join(sql_parts) if isinstance(sql_parts, list) else str(sql_parts)
+                lines.append(f"**{name}**")
+                lines.append("")
+                if sql_text.strip():
+                    lines.append("```sql")
+                    lines.append(sql_text.strip())
+                    lines.append("```")
 
-    if any([filters, measures, dimensions, join_specs]):
-        content += "## 🔧 SQL Components\n\n"
-
-        if join_specs:
-            content += f"### Joins ({len(join_specs)})\n\n"
-            for join in join_specs:
-                if isinstance(join, dict):
-                    left = join.get("left_table", "")
-                    right = join.get("right_table", "")
-                    condition = join.get("join_condition", join.get("condition", ""))
-                    content += f"- `{left}` ↔ `{right}`"
-                    if condition:
-                        content += f": `{condition}`"
-                    content += "\n"
-            content += "\n"
-
-        if filters:
-            content += f"### Filters ({len(filters)})\n\n"
-            for f in filters:
-                alias = f.get("alias", "unnamed")
-                expr = f.get("sql_expression", "")
-                content += f"- **{alias}**: `{expr}`\n"
-            content += "\n"
-
-        if measures:
-            content += f"### Measures ({len(measures)})\n\n"
-            for m in measures:
-                alias = m.get("alias", "unnamed")
-                expr = m.get("sql_expression", "")
-                content += f"- **{alias}**: `{expr}`\n"
-            content += "\n"
-
-        if dimensions:
-            content += f"### Dimensions ({len(dimensions)})\n\n"
-            for d in dimensions:
-                alias = d.get("alias", "unnamed")
-                expr = d.get("sql_expression", "")
-                content += f"- **{alias}**: `{expr}`\n"
-            content += "\n"
-
-    # ── Links & Metadata ──
-    content += "## 🔗 Links & Metadata\n\n"
-    content += f"- **Space ID**: `{space_id}`\n"
-    content += f"- **Warehouse ID**: `{warehouse_id}`\n"
-    content += f"- **Created By**: {created_by}\n"
+    # Links & Metadata
+    section("Links & Metadata")
+    lines.append(f"- **Space ID**: `{space_id}`")
+    lines.append(f"- **Warehouse ID**: `{warehouse_id}`")
+    lines.append(f"- **Created By**: {created_by}")
     if workspace_host:
-        content += f"- **Open in Databricks**: [{title} →]({workspace_host}/genie/rooms/{space_id})\n"
-    content += f"\n---\n*Last synced: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n"
+        db_url = f"{workspace_host}/genie/rooms/{space_id}"
+        if workspace_org_id:
+            db_url += f"?o={workspace_org_id}"
+        lines.append(f"- **Open in Databricks**: [{title}]({db_url})")
+    lines.extend(["", "", "---", ""])
+    lines.append(f"*Last synced: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
 
-    return content
+    return "\n".join(lines) + "\n"
 
 
 # Process each space
@@ -621,6 +638,54 @@ if _cm_internal_name and _cm_field_map:
             print(f"   ⚠ CM update for {title} failed: {e}")
 else:
     print("   ⚠ Could not resolve CM field names — skipping REST API update")
+
+# PyAtlan's CustomEntity schema has no `assetUserDefinedType` field, so save() can't
+# write it. That attribute is what drives the "Genie Space" vs "Custom" UI label in
+# Atlan's asset-type filter. Set it via REST on every synced entity.
+print(f"\n🏷  Setting assetUserDefinedType via REST API...")
+for space_data in genie_spaces:
+    title = space_data["basic_info"]["title"]
+    entity = existing_entities.get(title)
+    if not entity or not entity.guid:
+        try:
+            sr = (
+                FluentSearch()
+                .where(CustomEntity.CONNECTION_QUALIFIED_NAME.eq(CONNECTION_QN))
+                .where(CustomEntity.NAME.eq(title))
+                .page_size(1)
+            ).to_request()
+            for a in client.asset.search(sr):
+                if isinstance(a, CustomEntity):
+                    entity = a
+                    break
+        except Exception:
+            pass
+
+    if not entity or not entity.guid:
+        print(f"   ⚠ Skipping assetUserDefinedType for {title} — no GUID")
+        continue
+
+    try:
+        resp = requests.post(
+            f"{ATLAN_BASE_URL}/api/meta/entity/bulk",
+            headers=_api_headers,
+            json={"entities": [{
+                "typeName": "CustomEntity",
+                "guid": entity.guid,
+                "attributes": {
+                    "qualifiedName": entity.qualified_name,
+                    "name": title,
+                    "assetUserDefinedType": "Genie Space",
+                },
+            }]},
+            timeout=30,
+        )
+        if resp.status_code in (200, 204):
+            print(f"   ✓ assetUserDefinedType: {title}")
+        else:
+            print(f"   ⚠ assetUserDefinedType for {title}: HTTP {resp.status_code} — {resp.text[:200]}")
+    except Exception as e:
+        print(f"   ⚠ assetUserDefinedType for {title} failed: {e}")
 
 # Always update READMEs for all entities (README content isn't diffed by PyAtlan)
 print(f"\n📝 Updating READMEs for all {len(entities_to_save)} entity(ies)...")

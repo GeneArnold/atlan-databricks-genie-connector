@@ -251,6 +251,35 @@ def _check_user_roles(token, username, user_id, persona_role):
     return False, "check_failed"
 
 
+_workspace_org_id_cache: Dict[str, str] = {}
+
+
+def get_workspace_org_id(workspace_url: str, token: str) -> str:
+    """Resolve the Databricks workspace org id (the `?o=` query param on share URLs).
+
+    Every Databricks API response carries it as the `x-databricks-org-id` response
+    header. We call a lightweight endpoint that works with any PAT scope and cache
+    the result per workspace URL.
+    """
+    key = workspace_url.rstrip("/")
+    cached = _workspace_org_id_cache.get(key)
+    if cached:
+        return cached
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            r = client.get(
+                f"{key}/api/2.0/preview/scim/v2/Me",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        org_id = r.headers.get("x-databricks-org-id", "")
+        if org_id:
+            _workspace_org_id_cache[key] = org_id
+        return org_id
+    except Exception as e:
+        logger.warning(f"Could not resolve workspace org id for {key}: {e}")
+        return ""
+
+
 class GenieClient:
     """Simplified Genie client for chat interface"""
 
@@ -368,13 +397,17 @@ def get_space_info(space_guid):
     # Demo mode fallback
     if space_guid == 'demo-space-guid':
         demo_ws = next(iter(genie_clients), '')
+        demo_sid = '01f10ea33fc010dcb2dc604b75ac4336'
+        demo_token = DATABRICKS_WORKSPACES.get(demo_ws, '') if demo_ws else ''
+        demo_org = get_workspace_org_id(demo_ws, demo_token) if demo_ws and demo_token else ''
+        demo_url = f"{demo_ws}/genie/rooms/{demo_sid}" + (f"?o={demo_org}" if demo_org else '')
         return jsonify({
             'success': True,
-            'space_id': '01f10ea33fc010dcb2dc604b75ac4336',
+            'space_id': demo_sid,
             'name': 'Wide World Importers Sales (Demo)',
             'description': 'Demo Genie space for testing',
             'workspace_url': demo_ws,
-            'databricks_url': f"{demo_ws}/genie/spaces/01f10ea33fc010dcb2dc604b75ac4336",
+            'databricks_url': demo_url,
             'sample_questions': []
         })
 
@@ -488,13 +521,18 @@ def get_space_info(space_guid):
             if not workspace_url and genie_clients:
                 workspace_url = next(iter(genie_clients))
 
+            ws = (workspace_url or '').rstrip('/')
+            ws_token = DATABRICKS_WORKSPACES.get(ws, '') if ws else ''
+            ws_org_id = get_workspace_org_id(ws, ws_token) if ws and ws_token else ''
+            databricks_url = f"{ws}/genie/rooms/{databricks_space_id}" + (f"?o={ws_org_id}" if ws_org_id else '')
+
             return jsonify({
                 'success': True,
                 'space_id': databricks_space_id,
                 'name': attributes.get('name') or entity.get('displayText') or 'Genie Space',
                 'description': attributes.get('userDescription') or attributes.get('description') or 'Databricks Genie space for data analysis',
-                'workspace_url': workspace_url or '',
-                'databricks_url': f"{workspace_url or ''}/genie/spaces/{databricks_space_id}",
+                'workspace_url': ws,
+                'databricks_url': databricks_url,
                 'sample_questions': sample_questions[:5]
             })
         else:
